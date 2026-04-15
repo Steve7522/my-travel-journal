@@ -167,17 +167,55 @@
                 } catch(e) { alert("載入失敗"); }
                 showLoader(false);
             } else {
-                const saved = localStorage.getItem('my_travel_vHierarchical');
-                if (saved) {
-                    const parsed = JSON.parse(saved);
-                    if (parsed.projects && Array.isArray(parsed.projects)) {
-                        appData = parsed;
-                    }
-                }
+                // 資料搬移與載入邏輯
+                loadAndMigrateData();
             }
             
             updateUI();
             setupHeader();
+        }
+
+        // 自動搬移舊版資料至新版多專案結構
+        function loadAndMigrateData() {
+            const currentKey = 'my_travel_vHierarchical';
+            const oldKeys = ['my_travel_vFinal', 'my_travel_v4', 'my_travel_v3', 'my_travel_v2', 'my_travel_v1'];
+            
+            const saved = localStorage.getItem(currentKey);
+            if (saved) {
+                const parsed = JSON.parse(saved);
+                if (parsed.projects && Array.isArray(parsed.projects)) {
+                    appData = parsed;
+                    return;
+                }
+            }
+
+            // 如果新抽屜是空的，就去翻舊抽屜
+            let migratedProjects = [];
+            oldKeys.forEach(key => {
+                const oldData = localStorage.getItem(key);
+                if (oldData) {
+                    try {
+                        const data = JSON.parse(oldData);
+                        // 判斷舊資料格式 (有些是直接帶 title/days，有些是包在物件裡)
+                        let title = data.title || "舊版匯入行程";
+                        let days = data.days || [];
+                        if (days.length > 0) {
+                            migratedProjects.push({
+                                id: Date.now() + Math.random(),
+                                title: title,
+                                days: days
+                            });
+                        }
+                    } catch(e) { console.error("解析舊資料失敗:", key); }
+                }
+            });
+
+            if (migratedProjects.length > 0) {
+                appData.projects = migratedProjects;
+                appData.activeProjectIndex = 0;
+                saveLocally();
+                alert(`成功從舊版本搬移 ${migratedProjects.length} 個行程到新分類中！`);
+            }
         }
 
         function setupHeader() {
@@ -299,23 +337,15 @@
             if (!isCloudEnabled) return alert("Firebase 未連線");
             showLoader(true);
             
-            // 檢查 URL 中是否有 Hash ID
             const hashId = window.location.hash.substring(1);
-            
-            // 如果網址已有 ID，就更新舊檔；如果沒有，就產生新 ID
             const shareId = hashId || crypto.randomUUID().substring(0, 8);
             
             try {
-                // 取得當前選中的專案內容
                 const currentTrip = appData.projects[appData.activeProjectIndex];
-                
-                // 存入 Firebase
                 await setDoc(doc(db, 'itineraries', shareId), currentTrip);
                 
-                // 組合完整網址
                 const shareUrl = `${window.location.origin}${window.location.pathname}#${shareId}`;
                 
-                // 自動複製連結
                 const el = document.createElement('textarea');
                 el.value = shareUrl;
                 document.body.appendChild(el);
@@ -326,14 +356,13 @@
                 const msg = hashId ? "✅ 同步成功！雲端資料已更新。" : "✅ 儲存成功！專屬連結已產生並複製到剪貼簿。";
                 alert(msg);
                 
-                // 如果是第一次產生連結，更新 URL
                 if (!window.location.hash) {
                     window.location.hash = shareId;
-                    init(); // 重新初始化進入協作模式
+                    init(); 
                 }
             } catch (e) { 
                 console.error(e);
-                alert("儲存失敗，可能照片太多導致單一專案容量爆滿。"); 
+                alert("儲存失敗，內容可能過大"); 
             }
             showLoader(false);
         };
