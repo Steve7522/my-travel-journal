@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>阿光阿旂旅遊日誌</title>
+    <title>我的旅遊足跡 - 雲端專案綁定版</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <style>
@@ -108,7 +108,7 @@
     <!-- 載入中動畫遮罩 -->
     <div id="loader" class="fixed inset-0 loading-overlay flex flex-col items-center justify-center z-50 hidden">
         <div class="animate-spin rounded-full h-14 w-14 border-4 border-blue-500 border-t-transparent mb-4"></div>
-        <p class="text-blue-600 font-bold animate-pulse">正在處理同步...</p>
+        <p class="text-blue-600 font-bold animate-pulse">同步中...</p>
     </div>
 
     <script type="module">
@@ -175,11 +175,15 @@
             updateUI();
             setupHeader();
 
-            // 監聽網址變化
+            // 監聽網址變化：當點擊專案按鈕換 Hash 時觸發
             window.onhashchange = () => {
                 const newHash = window.location.hash.substring(1);
-                if (newHash && (!appData.projects[appData.activeProjectIndex] || appData.projects[appData.activeProjectIndex].cloudId !== newHash)) {
-                    loadSpecificItinerary(newHash);
+                if (newHash) {
+                    // 如果目前的 activeProject 並非該 Hash，則執行載入
+                    const currentProj = appData.projects[appData.activeProjectIndex];
+                    if (!currentProj || currentProj.cloudId !== newHash) {
+                        loadSpecificItinerary(newHash);
+                    }
                 }
             };
         }
@@ -192,10 +196,12 @@
                 if (masterSnap.exists()) {
                     const manifest = masterSnap.data();
                     if (manifest.projects && manifest.projects.length > 0) {
-                        // 保留目前本機中已有的詳細 days 資料，避免被簡版的 Manifest 覆蓋成空白
+                        // 保留目前本機中已有的詳細行程資料，避免被簡版的清單覆蓋成空白
                         const mergedProjects = manifest.projects.map(cloudProj => {
                             const localMatch = appData.projects.find(p => p.cloudId === cloudProj.cloudId);
-                            return localMatch && localMatch.days ? { ...cloudProj, days: localMatch.days } : cloudProj;
+                            // 如果本地有詳細 days 就用本地，否則用雲端清單的空殼
+                            return localMatch && localMatch.days && localMatch.days.length > 0 ? 
+                                { ...cloudProj, days: localMatch.days } : cloudProj;
                         });
                         appData.projects = mergedProjects;
                     }
@@ -213,10 +219,11 @@
                     const tripData = snap.data();
                     const existingIdx = appData.projects.findIndex(p => p.cloudId === id);
                     if (existingIdx !== -1) {
-                        // 完整更新該專案的內容 (包含 days 和 items)
+                        // 關鍵：將下載到的詳細詳情 (days, items) 塞回對應的專案中
                         appData.projects[existingIdx] = { ...appData.projects[existingIdx], ...tripData };
                         appData.activeProjectIndex = existingIdx;
                     } else {
+                        // 如果清單中沒這筆，就新增進去
                         appData.projects.push({ ...tripData, cloudId: id });
                         appData.activeProjectIndex = appData.projects.length - 1;
                     }
@@ -228,9 +235,9 @@
             } catch(e) { console.error("載入行程詳情失敗", e); }
             showLoader(false);
             updateUI();
-            if (document.getElementById('trip-title')) {
-                document.getElementById('trip-title').value = appData.projects[appData.activeProjectIndex].title;
-            }
+            // 更新輸入框標題
+            const titleInput = document.getElementById('trip-title');
+            if (titleInput) titleInput.value = appData.projects[appData.activeProjectIndex].title;
         }
 
         function setupHeader() {
@@ -245,19 +252,22 @@
             }
         }
 
-        // --- 專案切換：切換時必須觸發詳情載入 ---
+        // --- 專案控制 ---
         window.switchProject = async (index) => {
             const project = appData.projects[index];
+            // 立即變更索引讓 UI 反應
             appData.activeProjectIndex = index;
             appData.activeDayIndex = 0;
 
             if (project.cloudId) {
-                // 如果有雲端 ID，直接透過 Hash 切換觸發 loadSpecificItinerary
+                // 如果已經與雲端綁定，修改 Hash 觸發 loadSpecificItinerary 來抓最新詳情
                 window.location.hash = project.cloudId;
             } else {
+                // 如果是尚未同步的新專案，則清空 Hash 並直接渲染
                 window.location.hash = "";
                 updateUI();
-                document.getElementById('trip-title').value = project.title;
+                const titleInput = document.getElementById('trip-title');
+                if (titleInput) titleInput.value = project.title;
             }
         };
 
@@ -273,7 +283,8 @@
             appData.activeDayIndex = 0;
             window.location.hash = ""; 
             updateUI();
-            document.getElementById('trip-title').value = newProject.title;
+            const titleInput = document.getElementById('trip-title');
+            if (titleInput) titleInput.value = newProject.title;
             saveLocally();
         };
 
@@ -294,24 +305,27 @@
                 const syncedProjIdx = appData.projects.findIndex(p => p.cloudId);
                 if (syncedProjIdx !== -1) {
                     await loadSpecificItinerary(appData.projects[syncedProjIdx].cloudId);
+                } else {
+                    updateUI();
                 }
-                updateUI();
-                alert("✅ 雲端清單與內容已同步！");
+                alert("✅ 雲端資料同步成功！");
             } catch (e) {
-                alert("讀取雲端失敗。");
+                alert("讀取失敗。");
             }
             showLoader(false);
         };
 
+        // --- 核心同步功能：確保詳情與清單都更新 ---
         window.saveToCloud = async () => {
             if (!isCloudEnabled) return alert("Firebase 未連線");
             showLoader(true);
             
             const currentProj = appData.projects[appData.activeProjectIndex];
+            // 沿用舊的 cloudId 或產生新的
             const shareId = currentProj.cloudId || crypto.randomUUID().substring(0, 8);
             
             try {
-                // 1. 儲存詳情
+                // 1. 將詳細行程內容 (包括 days, items, photos) 存入雲端
                 await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'itineraries', shareId), {
                     title: currentProj.title,
                     days: currentProj.days,
@@ -319,9 +333,10 @@
                     cloudId: shareId
                 });
                 
+                // 2. 本地更新 ID 綁定
                 currentProj.cloudId = shareId;
                 
-                // 2. 更新清單
+                // 3. 更新雲端總清單 (Manifest)，這樣別人進網址才看得到這顆按鈕
                 const manifest = {
                     projects: appData.projects.map(p => ({
                         id: p.id,
@@ -332,18 +347,18 @@
                 await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'itineraries', 'manifest'), manifest);
                 
                 window.location.hash = shareId;
-                alert(`✅ 同步成功！「${currentProj.title}」已存入雲端。`);
+                alert(`✅ 行程內容與清單同步成功！\n專案「${currentProj.title}」已保存。`);
                 
                 saveLocally();
                 updateUI();
             } catch (e) { 
                 console.error(e);
-                alert("同步失敗，內容可能過大"); 
+                alert("同步失敗，內容可能過大 (照片太多) 或權限未開啟"); 
             }
             showLoader(false);
         };
 
-        // --- 行程功能 ---
+        // --- 行程與照片功能 (保持與初始版本一致) ---
         window.addDay = () => {
             appData.projects[appData.activeProjectIndex].days.push({ id: Date.now(), items: [] });
             appData.activeDayIndex = appData.projects[appData.activeProjectIndex].days.length - 1;
@@ -368,7 +383,11 @@
         };
 
         window.addActivity = () => {
-            appData.projects[appData.activeProjectIndex].days[appData.activeDayIndex].items.push({ id: Date.now(), name: "", note: "", img: "" });
+            const project = appData.projects[appData.activeProjectIndex];
+            if (!project.days[appData.activeDayIndex]) {
+                project.days[appData.activeDayIndex] = { id: Date.now(), items: [] };
+            }
+            project.days[appData.activeDayIndex].items.push({ id: Date.now(), name: "", note: "", img: "" });
             updateUI();
             saveLocally();
         };
@@ -391,13 +410,13 @@
                 img.src = e.target.result;
                 img.onload = () => {
                     const canvas = document.createElement('canvas');
-                    const max = 800;
+                    const max = 800; // 壓縮圖片
                     let w = img.width, h = img.height;
                     if (w > max) { h *= max/w; w = max; }
                     canvas.width = w; canvas.height = h;
                     canvas.getContext('2d').drawImage(img, 0, 0, w, h);
                     const item = appData.projects[appData.activeProjectIndex].days[appData.activeDayIndex].items.find(i => i.id === itemId);
-                    item.img = canvas.toDataURL('image/jpeg', 0.6);
+                    item.img = canvas.toDataURL('image/jpeg', 0.6); // 降低品質節省雲端空間
                     showLoader(false);
                     updateUI();
                     saveLocally();
@@ -418,7 +437,7 @@
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `旅遊備份.json`;
+            a.download = `旅遊備份-${Date.now()}.json`;
             a.click();
         };
 
@@ -430,6 +449,7 @@
             document.getElementById('loader').classList.toggle('hidden', !show);
         }
 
+        // --- 介面渲染：確保行程卡片能正確呈現 ---
         function updateUI() {
             renderProjects();
             renderTabs();
@@ -439,6 +459,7 @@
 
         function renderProjects() {
             const list = document.getElementById('trip-list');
+            if (!list) return;
             list.innerHTML = appData.projects.map((proj, idx) => `
                 <button onclick="switchProject(${idx})" class="px-4 py-1.5 text-xs transition-all whitespace-nowrap font-medium flex items-center gap-1.5 ${appData.activeProjectIndex === idx ? 'trip-tab-active' : 'text-gray-500 bg-white border border-gray-200 hover:bg-gray-50 rounded-full'}">
                     ${proj.cloudId ? '<i data-lucide="cloud" class="w-3 h-3"></i>' : ''}
@@ -449,8 +470,8 @@
 
         function renderTabs() {
             const currentTrip = appData.projects[appData.activeProjectIndex];
-            if (!currentTrip || !currentTrip.days) return;
             const list = document.getElementById('tabs-list');
+            if (!list || !currentTrip || !currentTrip.days) return;
             list.innerHTML = currentTrip.days.map((day, idx) => `
                 <button onclick="switchDay(${idx})" class="pb-2 px-1 text-sm transition-all flex-shrink-0 ${appData.activeDayIndex === idx ? 'day-tab-active' : 'text-gray-400 hover:text-gray-600'}">
                     第 ${idx + 1} 天
@@ -462,24 +483,26 @@
             const container = document.getElementById('current-day-content');
             const emptyState = document.getElementById('empty-state');
             const project = appData.projects[appData.activeProjectIndex];
+            
+            // 檢查當前天數是否存在
             const currentDay = (project && project.days) ? project.days[appData.activeDayIndex] : null;
 
-            if (!currentDay || (currentDay.items && currentDay.items.length === 0)) {
-                container.innerHTML = "";
-                emptyState.classList.remove('hidden');
+            if (!currentDay || !currentDay.items || currentDay.items.length === 0) {
+                if (container) container.innerHTML = "";
+                if (emptyState) emptyState.classList.remove('hidden');
             } else {
-                emptyState.classList.add('hidden');
+                if (emptyState) emptyState.classList.add('hidden');
                 container.innerHTML = currentDay.items.map(item => `
                     <div class="bg-white rounded-[2rem] shadow-sm border border-gray-100 overflow-hidden trip-card">
                         ${item.img ? `<img src="${item.img}" class="w-full h-auto max-h-[500px] object-cover">` : ''}
                         <div class="p-6">
                             <div class="flex items-center gap-2 mb-3">
                                 <i data-lucide="map-pin" class="w-4 h-4 text-blue-500"></i>
-                                <input type="text" placeholder="行程名稱？" value="${item.name}" 
+                                <input type="text" placeholder="去哪兒玩？" value="${item.name}" 
                                     oninput="updateText(${item.id}, 'name', this.value)"
                                     class="w-full font-bold text-gray-700 outline-none bg-transparent placeholder:text-gray-300 text-lg">
                             </div>
-                            <textarea placeholder="寫下回憶..." 
+                            <textarea placeholder="寫下當時的心情回憶..." 
                                 oninput="updateText(${item.id}, 'note', this.value)"
                                 class="w-full text-sm text-gray-500 outline-none resize-none bg-transparent min-h-[60px] leading-relaxed">${item.note}</textarea>
                             <div class="flex justify-between mt-6 pt-4 border-t border-gray-50">
@@ -489,7 +512,7 @@
                                     <input type="file" class="hidden" accept="image/*" onchange="handleImage(${item.id}, this)">
                                 </label>
                                 <button onclick="deleteItem(${item.id})" class="text-xs text-gray-300 hover:text-red-400 flex items-center gap-1 transition">
-                                    <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> 刪除
+                                    <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> 刪除景點
                                 </button>
                             </div>
                         </div>
