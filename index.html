@@ -6,275 +6,255 @@
     <title>我的旅遊足跡 - 雲端分享版</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
-    <!-- Firebase SDKs -->
+    <style>
+        body { background-color: #f8fafc; font-family: sans-serif; }
+        .day-border { border-left: 2px solid #e2e8f0; }
+        .day-dot { left: -9px; top: 0; width: 16px; height: 16px; background: #3b82f6; border-radius: 50%; border: 3px solid white; }
+        .loading-overlay { background: rgba(255, 255, 255, 0.8); backdrop-filter: blur(4px); }
+    </style>
+</head>
+<body>
+    <div id="app" class="max-w-2xl mx-auto p-6 pb-32">
+        <!-- Header -->
+        <header class="text-center mb-10">
+            <h1 id="trip-title" contenteditable="true" class="text-3xl font-bold text-gray-800 outline-none">我的精彩旅程</h1>
+            <p class="text-gray-500 mt-2" id="mode-indicator">模式：本地儲存 (僅限此瀏覽器)</p>
+        </header>
+
+        <!-- 行程列表 -->
+        <div id="days-container" class="space-y-10"></div>
+
+        <!-- 功能按鈕 -->
+        <div class="mt-10 space-y-4">
+            <button onclick="addDay()" class="w-full py-3 border-2 border-dashed border-gray-300 rounded-xl text-gray-500 hover:border-blue-500 hover:text-blue-500 transition flex items-center justify-center gap-2">
+                <i data-lucide="calendar-plus"></i> 新增下一天
+            </button>
+            <div class="flex gap-2">
+                <button onclick="saveToCloud()" id="share-btn" class="flex-1 py-3 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 shadow-lg shadow-blue-200 transition flex items-center justify-center gap-2">
+                    <i data-lucide="share-2"></i> 儲存並產生分享連結
+                </button>
+                <button onclick="clearData()" class="px-4 py-3 bg-gray-100 text-gray-400 rounded-xl hover:bg-red-50 hover:text-red-500 transition">
+                    <i data-lucide="trash-2"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 載入中遮罩 -->
+    <div id="loader" class="fixed inset-0 loading-overlay flex flex-col items-center justify-center z-50 hidden">
+        <div class="animate-spin rounded-full h-12 w-12 border-4 border-blue-500 border-t-transparent mb-4"></div>
+        <p class="text-blue-600 font-medium">同步雲端資料中...</p>
+    </div>
+
+    <!-- Firebase 模組 -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getFirestore, doc, setDoc, getDoc, collection, query, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
 
-        // Firebase 配置 (由環境自動注入)
-        const firebaseConfig = JSON.parse(__firebase_config);
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'travel-app-default';
-
-        // 狀態管理
-        let state = {
-            id: null,
+        // 全局狀態
+        let travelData = {
             title: "我的精彩旅程",
-            days: [{ id: Date.now(), items: [] }],
-            isReadOnly: false
+            days: [{ id: Date.now(), items: [] }]
         };
+        let db, auth, appId, isCloudEnabled = false;
 
-        // UI 渲染函數
-        function render() {
-            const container = document.getElementById('app-container');
-            
-            // 如果是唯讀模式且沒有資料
-            if (state.isReadOnly && state.days.length === 0) {
-                container.innerHTML = `<div class="text-center py-20 text-gray-500">載入中或找不到此行程...</div>`;
-                return;
+        // 初始化
+        async function init() {
+            // 嘗試偵測 Firebase 環境
+            try {
+                if (typeof __firebase_config !== 'undefined') {
+                    const firebaseConfig = JSON.parse(__firebase_config);
+                    const app = initializeApp(firebaseConfig);
+                    db = getFirestore(app);
+                    auth = getAuth(app);
+                    appId = typeof __app_id !== 'undefined' ? __app_id : 'travel-app';
+                    
+                    // 執行登入
+                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                        await signInWithCustomToken(auth, __initial_auth_token);
+                    } else {
+                        await signInAnonymously(auth);
+                    }
+                    isCloudEnabled = true;
+                    document.getElementById('mode-indicator').innerText = "模式：雲端同步已啟動";
+                }
+            } catch (e) {
+                console.log("未檢測到雲端設定，切換至本地模式");
             }
 
-            container.innerHTML = `
-                <div class="max-w-3xl mx-auto px-4 py-8">
-                    <!-- Header -->
-                    <div class="mb-8 text-center">
-                        ${state.isReadOnly ? 
-                            `<h1 class="text-4xl font-bold text-gray-800 mb-2">${state.title}</h1>` :
-                            `<input type="text" value="${state.title}" onchange="updateTitle(this.value)" 
-                                class="text-4xl font-bold text-gray-800 mb-2 text-center bg-transparent border-b border-transparent hover:border-gray-300 focus:border-blue-500 focus:outline-none w-full">`
-                        }
-                        <p class="text-gray-500">探索世界，留下回憶</p>
-                    </div>
-
-                    <!-- Days List -->
-                    <div class="space-y-12">
-                        ${state.days.map((day, dIdx) => `
-                            <div class="relative pl-8 border-l-2 border-blue-200">
-                                <div class="absolute -left-[11px] top-0 w-5 h-5 bg-blue-500 rounded-full border-4 border-white"></div>
-                                <div class="flex justify-between items-center mb-6">
-                                    <h2 class="text-2xl font-bold text-blue-600">第 ${dIdx + 1} 天</h2>
-                                    ${!state.isReadOnly ? `
-                                        <button onclick="addActivity(${day.id})" class="flex items-center gap-1 text-sm bg-blue-50 text-blue-600 px-3 py-1 rounded-full hover:bg-blue-100 transition">
-                                            <i data-lucide="plus" class="w-4 h-4"></i> 新增行程
-                                        </button>
-                                    ` : ''}
-                                </div>
-
-                                <div class="space-y-6">
-                                    ${day.items.length === 0 ? `<p class="text-gray-400 italic">尚未新增行程</p>` : ''}
-                                    ${day.items.map(item => `
-                                        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden transition-all hover:shadow-md">
-                                            ${item.image ? `<img src="${item.image}" class="w-full h-64 object-cover">` : ''}
-                                            <div class="p-6">
-                                                ${state.isReadOnly ? 
-                                                    `<h3 class="text-xl font-semibold text-gray-800 mb-2">${item.title || '未命名景點'}</h3>` :
-                                                    `<input type="text" placeholder="景點名稱" value="${item.title}" onchange="updateItem(${day.id}, ${item.id}, 'title', this.value)"
-                                                        class="text-xl font-semibold text-gray-800 mb-2 w-full focus:outline-none focus:ring-2 focus:ring-blue-100 rounded px-1">`
-                                                }
-                                                
-                                                ${state.isReadOnly ? 
-                                                    `<p class="text-gray-600 whitespace-pre-line">${item.note || ''}</p>` :
-                                                    `<textarea placeholder="寫下心情..." onchange="updateItem(${day.id}, ${item.id}, 'note', this.value)"
-                                                        class="text-gray-600 w-full focus:outline-none focus:ring-2 focus:ring-blue-100 rounded px-1 mt-2 min-h-[80px]">${item.note}</textarea>`
-                                                }
-
-                                                ${!state.isReadOnly ? `
-                                                    <div class="mt-4 flex gap-4 border-t pt-4">
-                                                        <label class="cursor-pointer flex items-center gap-1 text-sm text-gray-500 hover:text-blue-600">
-                                                            <i data-lucide="image" class="w-4 h-4"></i> 上傳照片
-                                                            <input type="file" class="hidden" accept="image/*" onchange="handleImage(${day.id}, ${item.id}, this)">
-                                                        </label>
-                                                        <button onclick="deleteItem(${day.id}, ${item.id})" class="flex items-center gap-1 text-sm text-gray-500 hover:text-red-500">
-                                                            <i data-lucide="trash-2" class="w-4 h-4"></i> 刪除
-                                                        </button>
-                                                    </div>
-                                                ` : ''}
-                                            </div>
-                                        </div>
-                                    `).join('')}
-                                </div>
-                            </div>
-                        `).join('')}
-                    </div>
-
-                    <!-- Actions -->
-                    ${!state.isReadOnly ? `
-                        <div class="mt-12 flex flex-col gap-4">
-                            <button onclick="addDay()" class="w-full py-4 border-2 border-dashed border-gray-300 rounded-2xl text-gray-500 hover:border-blue-400 hover:text-blue-500 transition-all flex justify-center items-center gap-2">
-                                <i data-lucide="calendar-plus"></i> 新增下一天
-                            </button>
-                            <button id="save-btn" onclick="saveToCloud()" class="w-full py-4 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all flex justify-center items-center gap-2">
-                                <i data-lucide="share-2"></i> 儲存並產生分享連結
-                            </button>
-                        </div>
-                    ` : `
-                        <div class="mt-12 text-center">
-                            <button onclick="window.location.hash=''" class="text-blue-600 hover:underline">我也要建立我的行程</button>
-                        </div>
-                    `}
-                </div>
-
-                <!-- Toast Notification -->
-                <div id="toast" class="fixed bottom-8 left-1/2 -translate-x-1/2 bg-gray-900 text-white px-6 py-3 rounded-full opacity-0 transition-opacity pointer-events-none z-50"></div>
-            `;
-            lucide.createIcons();
+            // 如果有 Hash 位址，則從雲端抓取資料
+            const hashId = window.location.hash.substring(1);
+            if (hashId && isCloudEnabled) {
+                showLoader(true);
+                const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'itineraries', hashId);
+                const snap = await getDoc(docRef);
+                if (snap.exists()) {
+                    travelData = snap.data();
+                    document.getElementById('mode-indicator').innerText = "模式：正在檢視分享行程";
+                    // 唯讀模式下隱藏功能按鈕
+                    document.getElementById('trip-title').contentEditable = "false";
+                }
+                showLoader(false);
+            } else {
+                // 本地讀取
+                const saved = localStorage.getItem('my_travel_v2');
+                if (saved) {
+                    travelData = JSON.parse(saved);
+                }
+            }
+            
+            render();
+            setupListeners();
         }
 
-        // 邏輯處理
-        window.updateTitle = (val) => { state.title = val; };
+        function setupListeners() {
+            document.getElementById('trip-title').innerText = travelData.title;
+            document.getElementById('trip-title').addEventListener('input', (e) => {
+                travelData.title = e.target.innerText;
+                saveLocally();
+            });
+        }
+
+        // 暴露功能給 HTML onclick
         window.addDay = () => {
-            state.days.push({ id: Date.now(), items: [] });
+            travelData.days.push({ id: Date.now(), items: [] });
             render();
+            saveLocally();
         };
+
         window.addActivity = (dayId) => {
-            const day = state.days.find(d => d.id === dayId);
-            day.items.push({ id: Date.now(), title: "", note: "", image: "" });
+            const day = travelData.days.find(d => d.id === dayId);
+            day.items.push({ id: Date.now(), name: "", note: "", img: "" });
             render();
+            saveLocally();
         };
-        window.updateItem = (dayId, itemId, field, value) => {
-            const day = state.days.find(d => d.id === dayId);
+
+        window.updateText = (dayId, itemId, field, value) => {
+            const day = travelData.days.find(d => d.id === dayId);
             const item = day.items.find(i => i.id === itemId);
             item[field] = value;
-        };
-        window.deleteItem = (dayId, itemId) => {
-            const day = state.days.find(d => d.id === dayId);
-            day.items = day.items.filter(i => i.id !== itemId);
-            render();
+            saveLocally();
         };
 
         window.handleImage = (dayId, itemId, input) => {
             const file = input.files[0];
             if (!file) return;
-            
-            showToast("正在處理照片...");
             const reader = new FileReader();
             reader.onload = (e) => {
-                // 簡單的圖片壓縮處理 (避免 Base64 太大)
                 const img = new Image();
                 img.src = e.target.result;
                 img.onload = () => {
                     const canvas = document.createElement('canvas');
-                    const MAX_WIDTH = 800;
-                    let width = img.width;
-                    let height = img.height;
-                    
-                    if (width > MAX_WIDTH) {
-                        height *= MAX_WIDTH / width;
-                        width = MAX_WIDTH;
-                    }
-                    canvas.width = width;
-                    canvas.height = height;
-                    const ctx = canvas.getContext('2d');
-                    ctx.drawImage(img, 0, 0, width, height);
-                    
-                    const compressedBase64 = canvas.toDataURL('image/jpeg', 0.7);
-                    const day = state.days.find(d => d.id === dayId);
+                    const max = 800;
+                    let w = img.width, h = img.height;
+                    if (w > max) { h *= max/w; w = max; }
+                    canvas.width = w; canvas.height = h;
+                    canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+                    const day = travelData.days.find(d => d.id === dayId);
                     const item = day.items.find(i => i.id === itemId);
-                    item.image = compressedBase64;
+                    item.img = canvas.toDataURL('image/jpeg', 0.6);
                     render();
-                    showToast("照片上傳成功！");
+                    saveLocally();
                 };
             };
             reader.readAsDataURL(file);
         };
 
-        // 雲端儲存與分享
+        window.deleteItem = (dayId, itemId) => {
+            const day = travelData.days.find(d => d.id === dayId);
+            day.items = day.items.filter(i => i.id !== itemId);
+            render();
+            saveLocally();
+        };
+
         window.saveToCloud = async () => {
-            const saveBtn = document.getElementById('save-btn');
-            saveBtn.disabled = true;
-            saveBtn.innerText = "儲存中...";
-            
+            if (!isCloudEnabled) {
+                alert("目前處於本地模式。請確認 GitHub 設定或聯繫開發者啟用雲端功能。");
+                return;
+            }
+            showLoader(true);
+            const shareId = crypto.randomUUID().substring(0, 8);
             try {
-                const user = auth.currentUser;
-                if (!user) throw new Error("尚未登入");
-
-                const docId = state.id || crypto.randomUUID();
-                const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'itineraries', docId);
+                const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'itineraries', shareId);
+                await setDoc(docRef, travelData);
+                const shareUrl = `${window.location.origin}${window.location.pathname}#${shareId}`;
                 
-                await setDoc(docRef, {
-                    title: state.title,
-                    days: state.days,
-                    updatedAt: Date.now()
-                });
-
-                state.id = docId;
-                const shareUrl = `${window.location.origin}${window.location.pathname}#${docId}`;
-                
-                // 複製到剪貼簿 (使用相容方法)
+                // 複製連結
                 const tempInput = document.createElement("input");
                 tempInput.value = shareUrl;
                 document.body.appendChild(tempInput);
                 tempInput.select();
                 document.execCommand("copy");
                 document.body.removeChild(tempInput);
+                
+                alert("儲存成功！分享連結已複製到剪貼簿：\n" + shareUrl);
+                window.location.hash = shareId;
+            } catch (e) {
+                alert("儲存失敗，請重試");
+            }
+            showLoader(false);
+        };
 
-                showToast("儲存成功！分享連結已複製到剪貼簿");
-                window.location.hash = docId;
-            } catch (err) {
-                console.error(err);
-                showToast("儲存失敗，請重試");
-            } finally {
-                saveBtn.disabled = false;
-                saveBtn.innerHTML = `<i data-lucide="share-2"></i> 儲存並產生分享連結`;
-                lucide.createIcons();
+        window.clearData = () => {
+            if(confirm("確定要清空嗎？")) {
+                localStorage.removeItem('my_travel_v2');
+                window.location.hash = "";
+                location.reload();
             }
         };
 
-        function showToast(msg) {
-            const toast = document.getElementById('toast');
-            toast.innerText = msg;
-            toast.classList.remove('opacity-0');
-            setTimeout(() => toast.classList.add('opacity-0'), 3000);
+        function saveLocally() {
+            localStorage.setItem('my_travel_v2', JSON.stringify(travelData));
         }
 
-        // 初始化 Firebase Auth & 路由切換
-        const init = async () => {
-            // 登入
-            await signInAnonymously(auth);
-            
-            const handleRoute = async () => {
-                const hash = window.location.hash.substring(1);
-                if (hash) {
-                    showToast("載入雲端行程中...");
-                    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'itineraries', hash);
-                    const snap = await getDoc(docRef);
-                    if (snap.exists()) {
-                        state = { ...snap.data(), id: hash, isReadOnly: true };
-                    } else {
-                        showToast("找不到該行程，已建立新行程");
-                        state.isReadOnly = false;
-                    }
-                } else {
-                    state = {
-                        id: null,
-                        title: "我的精彩旅程",
-                        days: [{ id: Date.now(), items: [] }],
-                        isReadOnly: false
-                    };
-                }
-                render();
-            };
+        function showLoader(show) {
+            document.getElementById('loader').classList.toggle('hidden', !show);
+        }
 
-            window.addEventListener('hashchange', handleRoute);
-            handleRoute();
-        };
+        function render() {
+            const container = document.getElementById('days-container');
+            container.innerHTML = travelData.days.map((day, idx) => `
+                <div class="relative pl-6 day-border">
+                    <div class="absolute day-dot"></div>
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-xl font-bold text-blue-600">第 ${idx + 1} 天</h2>
+                        ${window.location.hash ? '' : `
+                            <button onclick="addActivity(${day.id})" class="text-sm bg-blue-50 text-blue-500 px-3 py-1 rounded-full hover:bg-blue-100 transition flex items-center gap-1">
+                                <i data-lucide="plus" class="w-4 h-4"></i> 新增行程
+                            </button>
+                        `}
+                    </div>
+                    <div class="space-y-4">
+                        ${day.items.map(item => `
+                            <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+                                ${item.img ? `<img src="${item.img}" class="w-full h-auto max-h-96 object-cover rounded-lg mb-3">` : ''}
+                                <input type="text" placeholder="景點名稱" value="${item.name}" 
+                                    ${window.location.hash ? 'disabled' : ''}
+                                    oninput="updateText(${day.id}, ${item.id}, 'name', this.value)"
+                                    class="w-full font-bold text-gray-700 mb-1 outline-none border-b border-transparent focus:border-blue-200 bg-transparent">
+                                <textarea placeholder="當下的心情..." 
+                                    ${window.location.hash ? 'disabled' : ''}
+                                    oninput="updateText(${day.id}, ${item.id}, 'note', this.value)"
+                                    class="w-full text-sm text-gray-500 outline-none resize-none bg-transparent">${item.note}</textarea>
+                                ${window.location.hash ? '' : `
+                                    <div class="flex justify-between mt-2 pt-2 border-t border-gray-50">
+                                        <label class="text-xs text-gray-400 cursor-pointer hover:text-blue-500 flex items-center gap-1">
+                                            <i data-lucide="image" class="w-3 h-3"></i> 上傳照片
+                                            <input type="file" class="hidden" accept="image/*" onchange="handleImage(${day.id}, ${item.id}, this)">
+                                        </label>
+                                        <button onclick="deleteItem(${day.id}, ${item.id})" class="text-xs text-gray-300 hover:text-red-400">刪除</button>
+                                    </div>
+                                `}
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `).join('');
+            lucide.createIcons();
+        }
 
         init();
     </script>
-    <style>
-        body { background-color: #f8fafc; }
-        .day-card:last-child { border-left-color: transparent; }
-    </style>
-</head>
-<body class="antialiased">
-    <div id="app-container">
-        <!-- 由 JavaScript 動態渲染 -->
-        <div class="flex items-center justify-center min-h-screen">
-            <div class="animate-pulse text-gray-400">系統初始化中...</div>
-        </div>
-    </div>
 </body>
 </html>
