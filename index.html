@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>阿光阿旂家旅遊日誌</title>
+    <title>阿光阿旂家旅遊</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <style>
@@ -46,7 +46,10 @@
                         <i data-lucide="trash-2" class="w-4 h-4"></i>
                     </button>
                 </div>
-                <p id="mode-indicator" class="text-[9px] text-gray-400 mt-2 uppercase tracking-widest font-medium italic">連線狀態：初始化中...</p>
+                <div class="flex items-center justify-center gap-2 mt-2">
+                    <p id="mode-indicator" class="text-[9px] text-gray-400 uppercase tracking-widest font-medium italic">連線狀態：初始化中...</p>
+                    <button onclick="location.reload()" class="text-[9px] text-blue-500 hover:underline uppercase tracking-widest font-bold hidden" id="refresh-link">重新整理取得最新資料</button>
+                </div>
             </div>
 
             <!-- 3. 橫向天數切換標籤 -->
@@ -153,10 +156,11 @@
                     const snap = await getDoc(docRef);
                     if (snap.exists()) {
                         const sharedTrip = snap.data();
-                        // 載入雲端資料，並允許編輯
+                        // 載入雲端資料
                         appData.projects = [sharedTrip];
                         appData.activeProjectIndex = 0;
-                        document.getElementById('mode-indicator').innerText = "連線狀態：多人協作模式 (編輯後請記得儲存)";
+                        document.getElementById('mode-indicator').innerText = "連線狀態：協作模式 (正在編輯共享行程)";
+                        document.getElementById('refresh-link').classList.remove('hidden');
                     } else {
                         alert("找不到此行程資料");
                     }
@@ -290,22 +294,28 @@
             saveLocally();
         };
 
-        // --- 儲存與匯出 ---
+        // --- 儲存與同步 (核心協作邏輯) ---
         window.saveToCloud = async () => {
             if (!isCloudEnabled) return alert("Firebase 未連線");
             showLoader(true);
             
-            // 檢查是否有現有的 Hash ID，如果有就覆蓋原本的檔案
+            // 檢查 URL 中是否有 Hash ID
             const hashId = window.location.hash.substring(1);
+            
+            // 如果網址已有 ID，就更新舊檔；如果沒有，就產生新 ID
             const shareId = hashId || crypto.randomUUID().substring(0, 8);
             
             try {
+                // 取得當前選中的專案內容
                 const currentTrip = appData.projects[appData.activeProjectIndex];
+                
+                // 存入 Firebase
                 await setDoc(doc(db, 'itineraries', shareId), currentTrip);
                 
+                // 組合完整網址
                 const shareUrl = `${window.location.origin}${window.location.pathname}#${shareId}`;
                 
-                // 複製到剪貼簿
+                // 自動複製連結
                 const el = document.createElement('textarea');
                 el.value = shareUrl;
                 document.body.appendChild(el);
@@ -313,13 +323,17 @@
                 document.execCommand('copy');
                 document.body.removeChild(el);
                 
-                alert("✅ 同步成功！內容已更新至雲端。\n連結已複製到剪貼簿。");
+                const msg = hashId ? "✅ 同步成功！雲端資料已更新。" : "✅ 儲存成功！專屬連結已產生並複製到剪貼簿。";
+                alert(msg);
+                
+                // 如果是第一次產生連結，更新 URL
                 if (!window.location.hash) {
                     window.location.hash = shareId;
+                    init(); // 重新初始化進入協作模式
                 }
             } catch (e) { 
                 console.error(e);
-                alert("儲存失敗，內容可能過大 (照片太多)"); 
+                alert("儲存失敗，可能照片太多導致單一專案容量爆滿。"); 
             }
             showLoader(false);
         };
