@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>我的旅遊足跡 - 多專案分類分享版</title>
+    <title>我的旅遊足跡 - 多人協作分享版</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <style>
@@ -24,14 +24,14 @@
         
         <!-- 頂部固定區域 -->
         <div class="bg-white sticky top-0 z-30 shadow-sm border-b border-gray-100">
-            <!-- 1. 旅行專案切換 (大分類：日本大阪、韓國釜山等) -->
+            <!-- 1. 旅行專案切換 -->
             <div class="px-4 pt-4 pb-3 border-b border-gray-50 bg-slate-50">
                 <div class="flex items-center gap-3 overflow-x-auto hide-scrollbar">
                     <span class="text-[10px] font-black text-gray-400 whitespace-nowrap uppercase tracking-widest">旅行專案:</span>
                     <div id="trip-list" class="flex whitespace-nowrap space-x-2">
                         <!-- 旅行專案標籤會動態插入 -->
                     </div>
-                    <button onclick="addNewProject()" class="p-1.5 text-blue-500 hover:bg-blue-100 rounded-full transition-colors flex-shrink-0">
+                    <button id="add-project-btn" onclick="addNewProject()" class="p-1.5 text-blue-500 hover:bg-blue-100 rounded-full transition-colors flex-shrink-0">
                         <i data-lucide="plus" class="w-4 h-4"></i>
                     </button>
                 </div>
@@ -49,7 +49,7 @@
                 <p id="mode-indicator" class="text-[9px] text-gray-400 mt-2 uppercase tracking-widest font-medium italic">連線狀態：初始化中...</p>
             </div>
 
-            <!-- 3. 橫向天數切換標籤 (小分類：第一天、第二天) -->
+            <!-- 3. 橫向天數切換標籤 -->
             <div class="flex items-center px-4 overflow-x-auto hide-scrollbar border-t border-gray-50 bg-white">
                 <div id="tabs-list" class="flex whitespace-nowrap space-x-8 py-3">
                     <!-- 天數按鈕會動態插入 -->
@@ -84,7 +84,7 @@
                 
                 <div class="pt-8 border-t border-gray-100 grid grid-cols-1 gap-4">
                     <button onclick="saveToCloud()" id="share-btn" class="w-full py-4 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 shadow-xl shadow-blue-100 transition flex items-center justify-center gap-2">
-                        <i data-lucide="share-2" class="w-5 h-5"></i> 分享當前專案至雲端
+                        <i data-lucide="cloud-upload" class="w-5 h-5"></i> 儲存並同步至雲端
                     </button>
                     
                     <div class="flex gap-3">
@@ -153,14 +153,12 @@
                     const snap = await getDoc(docRef);
                     if (snap.exists()) {
                         const sharedTrip = snap.data();
+                        // 載入雲端資料，並允許編輯
                         appData.projects = [sharedTrip];
                         appData.activeProjectIndex = 0;
-                        document.getElementById('mode-indicator').innerText = "連線狀態：正在觀看分享專案 (唯讀)";
-                        document.getElementById('editor-actions').style.display = 'none';
-                        document.getElementById('add-day-btn').style.display = 'none';
-                        document.getElementById('del-project-btn').style.display = 'none';
-                        document.getElementById('add-day-btn').style.display = 'none';
-                        document.getElementById('trip-title').readOnly = true;
+                        document.getElementById('mode-indicator').innerText = "連線狀態：多人協作模式 (編輯後請記得儲存)";
+                    } else {
+                        alert("找不到此行程資料");
                     }
                 } catch(e) { alert("載入失敗"); }
                 showLoader(false);
@@ -183,7 +181,7 @@
             titleInput.value = appData.projects[appData.activeProjectIndex].title;
             titleInput.addEventListener('input', (e) => {
                 appData.projects[appData.activeProjectIndex].title = e.target.value;
-                renderProjects(); // 即時更新上方標籤名稱
+                renderProjects(); 
                 saveLocally();
             });
         }
@@ -296,12 +294,18 @@
         window.saveToCloud = async () => {
             if (!isCloudEnabled) return alert("Firebase 未連線");
             showLoader(true);
-            const shareId = crypto.randomUUID().substring(0, 8);
+            
+            // 檢查是否有現有的 Hash ID，如果有就覆蓋原本的檔案
+            const hashId = window.location.hash.substring(1);
+            const shareId = hashId || crypto.randomUUID().substring(0, 8);
+            
             try {
                 const currentTrip = appData.projects[appData.activeProjectIndex];
                 await setDoc(doc(db, 'itineraries', shareId), currentTrip);
+                
                 const shareUrl = `${window.location.origin}${window.location.pathname}#${shareId}`;
                 
+                // 複製到剪貼簿
                 const el = document.createElement('textarea');
                 el.value = shareUrl;
                 document.body.appendChild(el);
@@ -309,9 +313,14 @@
                 document.execCommand('copy');
                 document.body.removeChild(el);
                 
-                alert("✅ 專案已分享！網址已複製到剪貼簿。");
-                window.location.hash = shareId;
-            } catch (e) { alert("儲存失敗，內容可能過大"); }
+                alert("✅ 同步成功！內容已更新至雲端。\n連結已複製到剪貼簿。");
+                if (!window.location.hash) {
+                    window.location.hash = shareId;
+                }
+            } catch (e) { 
+                console.error(e);
+                alert("儲存失敗，內容可能過大 (照片太多)"); 
+            }
             showLoader(false);
         };
 
@@ -363,7 +372,6 @@
             const container = document.getElementById('current-day-content');
             const emptyState = document.getElementById('empty-state');
             const currentDay = appData.projects[appData.activeProjectIndex].days[appData.activeDayIndex];
-            const isReadOnly = !!window.location.hash;
 
             if (!currentDay || currentDay.items.length === 0) {
                 container.innerHTML = "";
@@ -377,26 +385,22 @@
                             <div class="flex items-center gap-2 mb-3">
                                 <i data-lucide="map-pin" class="w-4 h-4 text-blue-500"></i>
                                 <input type="text" placeholder="行程名稱？" value="${item.name}" 
-                                    ${isReadOnly ? 'disabled' : ''}
                                     oninput="updateText(${item.id}, 'name', this.value)"
                                     class="w-full font-bold text-gray-700 outline-none bg-transparent placeholder:text-gray-300 text-lg">
                             </div>
                             <textarea placeholder="寫下回憶..." 
-                                ${isReadOnly ? 'disabled' : ''}
                                 oninput="updateText(${item.id}, 'note', this.value)"
                                 class="w-full text-sm text-gray-500 outline-none resize-none bg-transparent min-h-[60px] leading-relaxed">${item.note}</textarea>
-                            ${isReadOnly ? '' : `
-                                <div class="flex justify-between mt-6 pt-4 border-t border-gray-50">
-                                    <label class="flex items-center gap-2 text-xs text-gray-400 cursor-pointer hover:text-blue-500 transition group">
-                                        <i data-lucide="camera" class="w-4 h-4 group-hover:scale-110 transition-transform"></i>
-                                        <span>上傳照片</span>
-                                        <input type="file" class="hidden" accept="image/*" onchange="handleImage(${item.id}, this)">
-                                    </label>
-                                    <button onclick="deleteItem(${item.id})" class="text-xs text-gray-300 hover:text-red-400 flex items-center gap-1 transition">
-                                        <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> 刪除
-                                    </button>
-                                </div>
-                            `}
+                            <div class="flex justify-between mt-6 pt-4 border-t border-gray-50">
+                                <label class="flex items-center gap-2 text-xs text-gray-400 cursor-pointer hover:text-blue-500 transition group">
+                                    <i data-lucide="camera" class="w-4 h-4 group-hover:scale-110 transition-transform"></i>
+                                    <span>上傳照片</span>
+                                    <input type="file" class="hidden" accept="image/*" onchange="handleImage(${item.id}, this)">
+                                </label>
+                                <button onclick="deleteItem(${item.id})" class="text-xs text-gray-300 hover:text-red-400 flex items-center gap-1 transition">
+                                    <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> 刪除
+                                </button>
+                            </div>
                         </div>
                     </div>
                 `).join('');
