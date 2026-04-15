@@ -3,68 +3,112 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>我的旅遊足跡 - 雲端分享版</title>
+    <title>我的旅遊足跡 - 橫向分頁分享版</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <style>
-        body { background-color: #f8fafc; font-family: sans-serif; }
-        .day-border { border-left: 2px solid #e2e8f0; }
-        .day-dot { left: -9px; top: 0; width: 16px; height: 16px; background: #3b82f6; border-radius: 50%; border: 3px solid white; }
+        body { background-color: #f8fafc; font-family: 'PingFang TC', 'Microsoft JhengHei', sans-serif; }
+        /* 隱藏捲軸 */
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        /* 標籤選中樣式 */
+        .tab-active { border-bottom: 3px solid #3b82f6; color: #3b82f6; font-weight: bold; }
+        /* 讀取遮罩樣式 */
         .loading-overlay { background: rgba(255, 255, 255, 0.8); backdrop-filter: blur(4px); }
+        /* 卡片懸浮效果 */
+        .trip-card { transition: all 0.2s ease-in-out; }
+        .trip-card:hover { transform: translateY(-3px); box-shadow: 0 10px 20px -5px rgba(0, 0, 0, 0.1); }
     </style>
 </head>
-<body>
-    <div id="app" class="max-w-2xl mx-auto p-6 pb-32">
-        <!-- 標題區域 -->
-        <header class="text-center mb-10">
-            <h1 id="trip-title" contenteditable="true" class="text-3xl font-bold text-gray-800 outline-none">我的精彩旅程</h1>
-            <p class="text-gray-400 text-sm mt-2" id="mode-indicator">模式：正在檢查連線...</p>
-        </header>
+<body class="pb-24">
+    <div id="app" class="max-w-2xl mx-auto">
+        
+        <!-- 頂部固定區域 -->
+        <div class="bg-white sticky top-0 z-30 shadow-sm border-b border-gray-100">
+            <!-- 旅行名稱輸入區 -->
+            <div class="p-4 pt-6 text-center">
+                <input type="text" id="trip-title" placeholder="點擊輸入旅行名稱 (例如：2024 東京之旅)"
+                    class="text-2xl font-bold text-gray-800 text-center bg-transparent outline-none w-full border-b border-transparent focus:border-blue-200 transition-all placeholder:text-gray-300">
+                <p id="mode-indicator" class="text-[10px] text-gray-400 mt-2 uppercase tracking-widest font-medium italic">系統狀態：初始化中...</p>
+            </div>
 
-        <!-- 行程列表容器 -->
-        <div id="days-container" class="space-y-10"></div>
-
-        <!-- 功能控制區 -->
-        <div class="mt-10 space-y-4">
-            <button onclick="addDay()" class="w-full py-3 border-2 border-dashed border-gray-300 rounded-xl text-gray-500 hover:border-blue-500 hover:text-blue-500 transition flex items-center justify-center gap-2">
-                <i data-lucide="calendar-plus"></i> 新增下一天
-            </button>
-            
-            <div class="grid grid-cols-1 gap-3">
-                <button onclick="saveToCloud()" id="share-btn" class="w-full py-3 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 shadow-lg shadow-blue-200 transition flex items-center justify-center gap-2">
-                    <i data-lucide="share-2"></i> 儲存並產生分享連結
-                </button>
-                
-                <div class="flex gap-2">
-                    <button onclick="exportJSON()" class="flex-1 py-2 bg-white border border-gray-200 text-gray-600 rounded-lg text-sm font-medium hover:bg-gray-50 flex items-center justify-center gap-2">
-                        <i data-lucide="download" class="w-4 h-4"></i> 匯出 JSON
-                    </button>
-                    <label class="flex-1 py-2 bg-white border border-gray-200 text-gray-600 rounded-lg text-sm font-medium hover:bg-gray-50 flex items-center justify-center gap-2 cursor-pointer">
-                        <i data-lucide="upload" class="w-4 h-4"></i> 匯入 JSON
-                        <input type="file" class="hidden" accept=".json" onchange="importJSON(this)">
-                    </label>
+            <!-- 橫向天數切換標籤 -->
+            <div class="flex items-center px-4 overflow-x-auto hide-scrollbar border-t border-gray-50 bg-white">
+                <div id="tabs-list" class="flex whitespace-nowrap space-x-8 py-3">
+                    <!-- JavaScript 會動態插入標籤按鈕 -->
                 </div>
-
-                <button onclick="clearData()" class="w-full py-2 text-xs text-red-300 hover:text-red-500 transition">
-                    清空目前瀏覽器中的紀錄
+                <!-- 新增天數按鈕 -->
+                <button id="add-day-btn" onclick="addDay()" class="ml-4 p-2 text-blue-500 hover:bg-blue-50 rounded-full transition-colors flex-shrink-0">
+                    <i data-lucide="plus-circle" class="w-6 h-6"></i>
                 </button>
             </div>
         </div>
+
+        <!-- 行程卡片顯示區 -->
+        <main class="p-5">
+            <div id="current-day-content" class="space-y-6">
+                <!-- JavaScript 會動態插入當日行程卡片 -->
+            </div>
+
+            <!-- 當沒有任何行程時顯示的畫面 -->
+            <div id="empty-state" class="hidden text-center py-24">
+                <div class="bg-blue-50 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6">
+                    <i data-lucide="map-pin" class="text-blue-400 w-10 h-10"></i>
+                </div>
+                <h3 class="text-gray-500 font-bold text-lg">今天還沒有安排行程</h3>
+                <p class="text-gray-400 text-sm mt-1">點擊下方按鈕開始記錄美好時刻吧！</p>
+            </div>
+
+            <!-- 功能控制區域 -->
+            <div id="editor-actions" class="mt-10 space-y-5">
+                <!-- 新增行程按鈕 -->
+                <button onclick="addActivity()" class="w-full py-5 bg-white border-2 border-dashed border-gray-200 rounded-3xl text-gray-400 hover:border-blue-300 hover:text-blue-500 hover:bg-blue-50 transition-all flex items-center justify-center gap-2 group">
+                    <i data-lucide="plus" class="group-hover:scale-110 transition-transform"></i>
+                    <span class="font-bold">新增景點紀錄</span>
+                </button>
+                
+                <!-- 雲端與匯出控制 -->
+                <div class="pt-8 border-t border-gray-100 grid grid-cols-1 gap-4">
+                    <button onclick="saveToCloud()" id="share-btn" class="w-full py-4 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 shadow-xl shadow-blue-100 transition flex items-center justify-center gap-2">
+                        <i data-lucide="share-2" class="w-5 h-5"></i> 儲存至雲端並產生分享連結
+                    </button>
+                    
+                    <div class="flex gap-3">
+                        <button onclick="exportJSON()" class="flex-1 py-3 bg-white border border-gray-200 text-gray-600 rounded-xl text-sm font-semibold hover:bg-gray-50 flex items-center justify-center gap-2">
+                            <i data-lucide="download" class="w-4 h-4"></i> 備份匯出
+                        </button>
+                        <label class="flex-1 py-3 bg-white border border-gray-200 text-gray-600 rounded-xl text-sm font-semibold hover:bg-gray-50 flex items-center justify-center gap-2 cursor-pointer">
+                            <i data-lucide="upload" class="w-4 h-4"></i> 匯入行程
+                            <input type="file" class="hidden" accept=".json" onchange="importJSON(this)">
+                        </label>
+                        <!-- 刪除整天 -->
+                        <button onclick="deleteCurrentDay()" id="del-day-btn" class="px-5 py-3 bg-red-50 text-red-400 rounded-xl hover:bg-red-100 transition" title="刪除今日">
+                            <i data-lucide="calendar-x" class="w-5 h-5"></i>
+                        </button>
+                    </div>
+                    
+                    <button onclick="clearData()" class="text-center py-2 text-[10px] text-gray-300 hover:text-red-400 transition uppercase tracking-widest">
+                        清除本機所有資料
+                    </button>
+                </div>
+            </div>
+        </main>
     </div>
 
-    <!-- 處理中動畫 -->
+    <!-- 載入中動畫遮罩 -->
     <div id="loader" class="fixed inset-0 loading-overlay flex flex-col items-center justify-center z-50 hidden">
-        <div class="animate-spin rounded-full h-12 w-12 border-4 border-blue-500 border-t-transparent mb-4"></div>
-        <p class="text-blue-600 font-medium">同步中...</p>
+        <div class="animate-spin rounded-full h-14 w-14 border-4 border-blue-500 border-t-transparent mb-4"></div>
+        <p class="text-blue-600 font-bold animate-pulse">正在處理同步...</p>
     </div>
 
+    <!-- Firebase 腳本模組 -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getFirestore, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
 
         // ==========================================
-        // 🛠️ 已自動填入你提供的 Firebase 設定資料
+        // 🛠️ Firebase 專屬設定 (已填入 Steve-Emma 金鑰)
         // ==========================================
         const myFirebaseConfig = {
             apiKey: "AIzaSyA4H7f_inVipLx6CtbUpOnStCAWVNO7xlc",
@@ -76,31 +120,29 @@
             measurementId: "G-SPWBV8TY1X"
         };
 
-        // 預設資料結構
+        // 應用程式資料狀態
         let travelData = {
             title: "我的精彩旅程",
             days: [{ id: Date.now(), items: [] }]
         };
-        
+        let activeDayIndex = 0;
         let db, auth, isCloudEnabled = false;
 
+        // 初始化主程式
         async function init() {
             try {
-                // 初始化 Firebase
                 const app = initializeApp(myFirebaseConfig);
                 db = getFirestore(app);
                 auth = getAuth(app);
-                
-                // 執行匿名登入
                 await signInAnonymously(auth);
                 isCloudEnabled = true;
-                document.getElementById('mode-indicator').innerText = "模式：雲端同步已啟動 (Steve-Emma 專案)";
+                document.getElementById('mode-indicator').innerText = "連線狀態：雲端同步已啟動 (Steve-Emma)";
             } catch (e) {
-                console.error("Firebase 初始化失敗:", e);
-                document.getElementById('mode-indicator').innerText = "模式：連線失敗，改用本地儲存";
+                console.error("Firebase 連線失敗:", e);
+                document.getElementById('mode-indicator').innerText = "連線狀態：本地模式 (離線)";
             }
 
-            // 路由檢查：如果是分享連結 (# 開頭)
+            // 路由控制：檢查 URL 是否包含分享 ID (#號後面的文字)
             const hashId = window.location.hash.substring(1);
             if (hashId && isCloudEnabled) {
                 showLoader(true);
@@ -109,106 +151,132 @@
                     const snap = await getDoc(docRef);
                     if (snap.exists()) {
                         travelData = snap.data();
-                        document.getElementById('mode-indicator').innerText = "模式：正在觀看分享行程";
-                        document.getElementById('trip-title').contentEditable = "false";
+                        document.getElementById('mode-indicator').innerText = "連線狀態：觀看分享行程 (唯讀)";
+                        // 隱藏編輯功能
+                        document.getElementById('editor-actions').style.display = 'none';
+                        document.getElementById('add-day-btn').style.display = 'none';
+                        document.getElementById('trip-title').readOnly = true;
                     }
                 } catch(e) {
-                    alert("載入分享內容失敗，請確認資料庫規則是否已發佈為 true");
+                    alert("載入失敗：請確認雲端資料庫規則是否已設為 allow read, write: if true");
                 }
                 showLoader(false);
             } else {
-                // 讀取本地快取
-                const saved = localStorage.getItem('my_travel_v3');
-                if (saved) {
-                    travelData = JSON.parse(saved);
-                }
+                // 載入本地瀏覽器的暫存資料
+                const saved = localStorage.getItem('my_travel_vFinal');
+                if (saved) travelData = JSON.parse(saved);
             }
             
-            render();
-            setupTitleListener();
+            updateUI();
+            setupHeader();
         }
 
-        function setupTitleListener() {
-            document.getElementById('trip-title').innerText = travelData.title;
-            document.getElementById('trip-title').addEventListener('input', (e) => {
-                travelData.title = e.target.innerText;
+        // 設定旅行標題監聽
+        function setupHeader() {
+            const titleInput = document.getElementById('trip-title');
+            titleInput.value = travelData.title;
+            titleInput.addEventListener('input', (e) => {
+                travelData.title = e.target.value;
                 saveLocally();
             });
         }
 
+        // --- 功能指令 ---
+
         window.addDay = () => {
             travelData.days.push({ id: Date.now(), items: [] });
-            render();
+            activeDayIndex = travelData.days.length - 1;
+            updateUI();
             saveLocally();
         };
 
-        window.addActivity = (dayId) => {
-            const day = travelData.days.find(d => d.id === dayId);
-            day.items.push({ id: Date.now(), name: "", note: "", img: "" });
-            render();
+        window.switchDay = (index) => {
+            activeDayIndex = index;
+            updateUI();
+        };
+
+        window.deleteCurrentDay = () => {
+            if (travelData.days.length <= 1) {
+                alert("至少需要保留一天的行程喔！");
+                return;
+            }
+            if (confirm(`確定要刪除 第 ${activeDayIndex + 1} 天 的內容嗎？`)) {
+                travelData.days.splice(activeDayIndex, 1);
+                activeDayIndex = Math.max(0, activeDayIndex - 1);
+                updateUI();
+                saveLocally();
+            }
+        };
+
+        window.addActivity = () => {
+            travelData.days[activeDayIndex].items.push({ id: Date.now(), name: "", note: "", img: "" });
+            updateUI();
             saveLocally();
         };
 
-        window.updateText = (dayId, itemId, field, value) => {
-            const day = travelData.days.find(d => d.id === dayId);
-            const item = day.items.find(i => i.id === itemId);
-            item[field] = value;
-            saveLocally();
+        window.updateText = (itemId, field, value) => {
+            const item = travelData.days[activeDayIndex].items.find(i => i.id === itemId);
+            if (item) {
+                item[field] = value;
+                saveLocally();
+            }
         };
 
-        window.handleImage = (dayId, itemId, input) => {
+        window.handleImage = (itemId, input) => {
             const file = input.files[0];
             if (!file) return;
+            
+            showLoader(true);
             const reader = new FileReader();
             reader.onload = (e) => {
                 const img = new Image();
                 img.src = e.target.result;
                 img.onload = () => {
                     const canvas = document.createElement('canvas');
-                    const max = 800; 
+                    const max = 800; // 壓縮後的寬度
                     let w = img.width, h = img.height;
                     if (w > max) { h *= max/w; w = max; }
                     canvas.width = w; canvas.height = h;
                     canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-                    const day = travelData.days.find(d => d.id === dayId);
-                    const item = day.items.find(i => i.id === itemId);
-                    item.img = canvas.toDataURL('image/jpeg', 0.6);
-                    render();
+                    
+                    const item = travelData.days[activeDayIndex].items.find(i => i.id === itemId);
+                    item.img = canvas.toDataURL('image/jpeg', 0.6); // 壓縮品質設為 60%
+                    
+                    showLoader(false);
+                    updateUI();
                     saveLocally();
                 };
             };
             reader.readAsDataURL(file);
         };
 
-        window.deleteItem = (dayId, itemId) => {
-            const day = travelData.days.find(d => d.id === dayId);
-            day.items = day.items.filter(i => i.id !== itemId);
-            render();
+        window.deleteItem = (itemId) => {
+            travelData.days[activeDayIndex].items = travelData.days[activeDayIndex].items.filter(i => i.id !== itemId);
+            updateUI();
             saveLocally();
         };
 
+        // 儲存至雲端 (Firebase Firestore)
         window.saveToCloud = async () => {
-            if (!isCloudEnabled) {
-                alert("Firebase 未能成功初始化。");
-                return;
-            }
+            if (!isCloudEnabled) return alert("Firebase 目前未連線");
             showLoader(true);
-            const shareId = crypto.randomUUID().substring(0, 8);
+            const shareId = crypto.randomUUID().substring(0, 8); // 產生短隨機 ID
             try {
-                const docRef = doc(db, 'itineraries', shareId);
-                await setDoc(docRef, travelData);
+                // 將整份資料存入 Firebase 資料庫的 itineraries 集合中
+                await setDoc(doc(db, 'itineraries', shareId), travelData);
                 
                 const shareUrl = `${window.location.origin}${window.location.pathname}#${shareId}`;
                 copyToClipboard(shareUrl);
-                alert("✅ 儲存成功！\n專屬分享連結已複製：\n" + shareUrl);
+                alert("✅ 行程已成功存入雲端！\n專屬分享連結已自動複製：\n" + shareUrl);
                 window.location.hash = shareId;
             } catch (e) {
                 console.error(e);
-                alert("儲存失敗！請確認 Firestore 規則是否已設為 allow read, write: if true;");
+                alert("儲存失敗：內容可能過大或雲端權限未正確開啟。");
             }
             showLoader(false);
         };
 
+        // 匯出/匯入/清空
         window.exportJSON = () => {
             const blob = new Blob([JSON.stringify(travelData)], {type: 'application/json'});
             const url = URL.createObjectURL(blob);
@@ -225,25 +293,28 @@
             reader.onload = (e) => {
                 try {
                     travelData = JSON.parse(e.target.result);
-                    render();
+                    activeDayIndex = 0;
+                    document.getElementById('trip-title').value = travelData.title;
+                    updateUI();
                     saveLocally();
-                    document.getElementById('trip-title').innerText = travelData.title;
                     alert("匯入成功！");
-                } catch (err) { alert("無效的檔案"); }
+                } catch (err) { alert("檔案讀取失敗"); }
             };
             reader.readAsText(file);
         };
 
         window.clearData = () => {
-            if(confirm("確定要清空嗎？這會刪除這台電腦上的紀錄。")) {
-                localStorage.removeItem('my_travel_v3');
-                window.location.hash = "";
-                location.reload();
+            if(confirm("確定要刪除此瀏覽器的所有暫存紀錄嗎？")) {
+                localStorage.removeItem('my_travel_vFinal');
+                location.href = window.location.pathname;
             }
         };
 
+        // 輔助函式
         function saveLocally() {
-            localStorage.setItem('my_travel_v3', JSON.stringify(travelData));
+            try {
+                localStorage.setItem('my_travel_vFinal', JSON.stringify(travelData));
+            } catch(e) { console.warn("暫存空間不足"); }
         }
 
         function showLoader(show) {
@@ -259,48 +330,66 @@
             document.body.removeChild(el);
         }
 
-        function render() {
-            const container = document.getElementById('days-container');
-            const isReadOnly = !!window.location.hash;
-            
-            container.innerHTML = travelData.days.map((day, idx) => `
-                <div class="relative pl-6 day-border">
-                    <div class="absolute day-dot"></div>
-                    <div class="flex justify-between items-center mb-4">
-                        <h2 class="text-xl font-bold text-blue-600">第 ${idx + 1} 天</h2>
-                        ${isReadOnly ? '' : `
-                            <button onclick="addActivity(${day.id})" class="text-sm bg-blue-50 text-blue-500 px-3 py-1 rounded-full hover:bg-blue-100 transition flex items-center gap-1">
-                                <i data-lucide="plus" class="w-4 h-4"></i> 新增行程
-                            </button>
-                        `}
-                    </div>
-                    <div class="space-y-4">
-                        ${day.items.map(item => `
-                            <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
-                                ${item.img ? `<img src="${item.img}" class="w-full h-auto max-h-96 object-cover rounded-lg mb-3">` : ''}
-                                <input type="text" placeholder="景點名稱" value="${item.name}" 
-                                    ${isReadOnly ? 'disabled' : ''}
-                                    oninput="updateText(${day.id}, ${item.id}, 'name', this.value)"
-                                    class="w-full font-bold text-gray-700 mb-1 outline-none bg-transparent">
-                                <textarea placeholder="當下的心情..." 
-                                    ${isReadOnly ? 'disabled' : ''}
-                                    oninput="updateText(${day.id}, ${item.id}, 'note', this.value)"
-                                    class="w-full text-sm text-gray-500 outline-none resize-none bg-transparent">${item.note}</textarea>
-                                ${isReadOnly ? '' : `
-                                    <div class="flex justify-between mt-2 pt-2 border-t border-gray-50">
-                                        <label class="text-xs text-gray-400 cursor-pointer hover:text-blue-500 flex items-center gap-1">
-                                            <i data-lucide="image" class="w-3 h-3"></i> 上傳照片
-                                            <input type="file" class="hidden" accept="image/*" onchange="handleImage(${day.id}, ${item.id}, this)">
-                                        </label>
-                                        <button onclick="deleteItem(${day.id}, ${item.id})" class="text-xs text-gray-300 hover:text-red-400">刪除行程</button>
-                                    </div>
-                                `}
-                            </div>
-                        `).join('')}
-                    </div>
-                </div>
-            `).join('');
+        // --- UI 渲染邏輯 ---
+
+        function updateUI() {
+            renderTabs();
+            renderContent();
             lucide.createIcons();
+        }
+
+        function renderTabs() {
+            const list = document.getElementById('tabs-list');
+            list.innerHTML = travelData.days.map((day, idx) => `
+                <button onclick="switchDay(${idx})" class="pb-2 px-1 text-sm transition-all flex-shrink-0 ${activeDayIndex === idx ? 'tab-active' : 'text-gray-400 hover:text-gray-600'}">
+                    第 ${idx + 1} 天
+                </button>
+            `).join('');
+        }
+
+        function renderContent() {
+            const container = document.getElementById('current-day-content');
+            const emptyState = document.getElementById('empty-state');
+            const day = travelData.days[activeDayIndex];
+            const isReadOnly = !!window.location.hash;
+
+            if (!day || day.items.length === 0) {
+                container.innerHTML = "";
+                emptyState.classList.remove('hidden');
+            } else {
+                emptyState.classList.add('hidden');
+                container.innerHTML = day.items.map(item => `
+                    <div class="bg-white rounded-[2rem] shadow-sm border border-gray-100 overflow-hidden trip-card">
+                        ${item.img ? `<img src="${item.img}" class="w-full h-auto max-h-[500px] object-cover">` : ''}
+                        <div class="p-6">
+                            <div class="flex items-center gap-2 mb-3">
+                                <i data-lucide="map-pin" class="w-4 h-4 text-blue-500"></i>
+                                <input type="text" placeholder="這個行程的名稱？" value="${item.name}" 
+                                    ${isReadOnly ? 'disabled' : ''}
+                                    oninput="updateText(${item.id}, 'name', this.value)"
+                                    class="w-full font-bold text-gray-700 outline-none bg-transparent placeholder:text-gray-300 text-lg">
+                            </div>
+                            <textarea placeholder="寫下當時的心情回憶..." 
+                                ${isReadOnly ? 'disabled' : ''}
+                                oninput="updateText(${item.id}, 'note', this.value)"
+                                class="w-full text-sm text-gray-500 outline-none resize-none bg-transparent min-h-[80px] leading-relaxed">${item.note}</textarea>
+                            
+                            ${isReadOnly ? '' : `
+                                <div class="flex justify-between mt-6 pt-4 border-t border-gray-50">
+                                    <label class="flex items-center gap-2 text-xs text-gray-400 cursor-pointer hover:text-blue-500 transition group">
+                                        <i data-lucide="camera" class="w-4 h-4 group-hover:scale-110 transition-transform"></i>
+                                        <span>上傳照片</span>
+                                        <input type="file" class="hidden" accept="image/*" onchange="handleImage(${item.id}, this)">
+                                    </label>
+                                    <button onclick="deleteItem(${item.id})" class="text-xs text-gray-300 hover:text-red-400 flex items-center gap-1 transition">
+                                        <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> 刪除紀錄
+                                    </button>
+                                </div>
+                            `}
+                        </div>
+                    </div>
+                `).join('');
+            }
         }
 
         init();
