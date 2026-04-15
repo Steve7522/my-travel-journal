@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>我的旅遊足跡 - 雲端專案綁定版</title>
+    <title>阿光阿旂旅遊日誌</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <style>
@@ -88,7 +88,7 @@
                 </button>
                 
                 <div class="pt-8 border-t border-gray-100 grid grid-cols-1 gap-4">
-                    <button onclick="saveToCloud()" id="share-btn" class="w-full py-4 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 shadow-xl shadow-blue-100 transition flex items-center justify-center gap-2">
+                    <button onclick="saveToCloud()" id="save-btn" class="w-full py-4 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 shadow-xl shadow-blue-100 transition flex items-center justify-center gap-2">
                         <i data-lucide="cloud-upload" class="w-5 h-5"></i> 同步專案與行程至雲端
                     </button>
                     
@@ -108,7 +108,7 @@
     <!-- 載入中動畫遮罩 -->
     <div id="loader" class="fixed inset-0 loading-overlay flex flex-col items-center justify-center z-50 hidden">
         <div class="animate-spin rounded-full h-14 w-14 border-4 border-blue-500 border-t-transparent mb-4"></div>
-        <p class="text-blue-600 font-bold animate-pulse">處理中...</p>
+        <p class="text-blue-600 font-bold animate-pulse">正在處理同步...</p>
     </div>
 
     <script type="module">
@@ -151,7 +151,7 @@
                 document.getElementById('mode-indicator').innerText = "連線狀態：離線模式";
             }
 
-            // 1. 先讀取雲端清單
+            // 1. 先讀取雲端清單 (Manifest)
             await fetchManifest();
 
             // 2. 判斷進入路徑
@@ -159,11 +159,10 @@
             if (hashId && isCloudEnabled) {
                 await loadSpecificItinerary(hashId);
             } else {
-                // 如果專案列表有內容，預設選第一個已同步的
-                const syncedProjIdx = appData.projects.findIndex(p => p.cloudId);
-                if (syncedProjIdx !== -1) {
-                    appData.activeProjectIndex = syncedProjIdx;
-                    await loadSpecificItinerary(appData.projects[syncedProjIdx].cloudId);
+                // 如果沒有指定 Hash，但清單裡有同步過的專案，就載入第一個
+                const syncedProj = appData.projects.find(p => p.cloudId);
+                if (syncedProj) {
+                    await loadSpecificItinerary(syncedProj.cloudId);
                 } else {
                     const saved = localStorage.getItem('my_travel_vBinding');
                     if (saved) {
@@ -176,9 +175,12 @@
             updateUI();
             setupHeader();
 
+            // 監聽網址變化
             window.onhashchange = () => {
                 const newHash = window.location.hash.substring(1);
-                if (newHash) loadSpecificItinerary(newHash);
+                if (newHash && (!appData.projects[appData.activeProjectIndex] || appData.projects[appData.activeProjectIndex].cloudId !== newHash)) {
+                    loadSpecificItinerary(newHash);
+                }
             };
         }
 
@@ -190,13 +192,19 @@
                 if (masterSnap.exists()) {
                     const manifest = masterSnap.data();
                     if (manifest.projects && manifest.projects.length > 0) {
-                        appData.projects = manifest.projects;
+                        // 保留目前本機中已有的詳細 days 資料，避免被簡版的 Manifest 覆蓋成空白
+                        const mergedProjects = manifest.projects.map(cloudProj => {
+                            const localMatch = appData.projects.find(p => p.cloudId === cloudProj.cloudId);
+                            return localMatch && localMatch.days ? { ...cloudProj, days: localMatch.days } : cloudProj;
+                        });
+                        appData.projects = mergedProjects;
                     }
                 }
-            } catch(e) { console.error("載入主表失敗", e); }
+            } catch(e) { console.error("載入清單失敗", e); }
         }
 
         async function loadSpecificItinerary(id) {
+            if (!id) return;
             showLoader(true);
             try {
                 const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'itineraries', id);
@@ -205,6 +213,7 @@
                     const tripData = snap.data();
                     const existingIdx = appData.projects.findIndex(p => p.cloudId === id);
                     if (existingIdx !== -1) {
+                        // 完整更新該專案的內容 (包含 days 和 items)
                         appData.projects[existingIdx] = { ...appData.projects[existingIdx], ...tripData };
                         appData.activeProjectIndex = existingIdx;
                     } else {
@@ -212,27 +221,45 @@
                         appData.activeProjectIndex = appData.projects.length - 1;
                     }
                     appData.activeDayIndex = 0;
-                    window.location.hash = id;
+                    if (window.location.hash !== '#' + id) {
+                        window.location.hash = id;
+                    }
                 }
-            } catch(e) { console.error("載入行程失敗", e); }
+            } catch(e) { console.error("載入行程詳情失敗", e); }
             showLoader(false);
             updateUI();
-            document.getElementById('trip-title').value = appData.projects[appData.activeProjectIndex].title;
+            if (document.getElementById('trip-title')) {
+                document.getElementById('trip-title').value = appData.projects[appData.activeProjectIndex].title;
+            }
         }
 
         function setupHeader() {
             const titleInput = document.getElementById('trip-title');
             if (titleInput) {
                 titleInput.value = appData.projects[appData.activeProjectIndex].title;
-                titleInput.addEventListener('input', (e) => {
+                titleInput.oninput = (e) => {
                     appData.projects[appData.activeProjectIndex].title = e.target.value;
                     renderProjects(); 
                     saveLocally();
-                });
+                };
             }
         }
 
-        // --- 核心邏輯 ---
+        // --- 專案切換：切換時必須觸發詳情載入 ---
+        window.switchProject = async (index) => {
+            const project = appData.projects[index];
+            appData.activeProjectIndex = index;
+            appData.activeDayIndex = 0;
+
+            if (project.cloudId) {
+                // 如果有雲端 ID，直接透過 Hash 切換觸發 loadSpecificItinerary
+                window.location.hash = project.cloudId;
+            } else {
+                window.location.hash = "";
+                updateUI();
+                document.getElementById('trip-title').value = project.title;
+            }
+        };
 
         window.addNewProject = () => {
             const newProject = {
@@ -245,22 +272,9 @@
             appData.activeProjectIndex = appData.projects.length - 1;
             appData.activeDayIndex = 0;
             window.location.hash = ""; 
-            document.getElementById('trip-title').value = newProject.title;
             updateUI();
+            document.getElementById('trip-title').value = newProject.title;
             saveLocally();
-        };
-
-        window.switchProject = (index) => {
-            appData.activeProjectIndex = index;
-            appData.activeDayIndex = 0;
-            const project = appData.projects[index];
-            if (project.cloudId) {
-                window.location.hash = project.cloudId;
-            } else {
-                window.location.hash = "";
-                updateUI();
-                document.getElementById('trip-title').value = project.title;
-            }
         };
 
         window.deleteCurrentProject = () => {
@@ -273,28 +287,21 @@
             }
         };
 
-        // 核心按鈕功能：強制從雲端讀取所有清單
         window.forceSyncFromCloud = async () => {
             showLoader(true);
             try {
                 await fetchManifest();
-                // 讀取完畢後，嘗試加載當前選中的或第一個有雲端 ID 的專案
-                const currentProj = appData.projects[appData.activeProjectIndex];
-                if (currentProj && currentProj.cloudId) {
-                    await loadSpecificItinerary(currentProj.cloudId);
-                } else if (appData.projects.length > 0) {
-                    const firstWithCloud = appData.projects.find(p => p.cloudId);
-                    if (firstWithCloud) await loadSpecificItinerary(firstWithCloud.cloudId);
+                const syncedProjIdx = appData.projects.findIndex(p => p.cloudId);
+                if (syncedProjIdx !== -1) {
+                    await loadSpecificItinerary(appData.projects[syncedProjIdx].cloudId);
                 }
                 updateUI();
-                alert("✅ 雲端清單讀取成功！您現在可以看到所有已同步的分類了。");
+                alert("✅ 雲端清單與內容已同步！");
             } catch (e) {
-                alert("讀取雲端失敗，請稍後再試。");
+                alert("讀取雲端失敗。");
             }
             showLoader(false);
         };
-
-        // --- 同步邏輯 ---
 
         window.saveToCloud = async () => {
             if (!isCloudEnabled) return alert("Firebase 未連線");
@@ -304,7 +311,7 @@
             const shareId = currentProj.cloudId || crypto.randomUUID().substring(0, 8);
             
             try {
-                // 1. 儲存當前詳細行程
+                // 1. 儲存詳情
                 await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'itineraries', shareId), {
                     title: currentProj.title,
                     days: currentProj.days,
@@ -312,10 +319,9 @@
                     cloudId: shareId
                 });
                 
-                // 2. 更新本機專案的 cloudId
                 currentProj.cloudId = shareId;
                 
-                // 3. 更新雲端清單 (Manifest)
+                // 2. 更新清單
                 const manifest = {
                     projects: appData.projects.map(p => ({
                         id: p.id,
@@ -326,13 +332,13 @@
                 await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'itineraries', 'manifest'), manifest);
                 
                 window.location.hash = shareId;
-                alert(`✅ 同步成功！\n\n「${currentProj.title}」已存入雲端清單。`);
+                alert(`✅ 同步成功！「${currentProj.title}」已存入雲端。`);
                 
                 saveLocally();
                 updateUI();
             } catch (e) { 
                 console.error(e);
-                alert("同步失敗，內容可能過大或權限未開啟"); 
+                alert("同步失敗，內容可能過大"); 
             }
             showLoader(false);
         };
@@ -456,9 +462,9 @@
             const container = document.getElementById('current-day-content');
             const emptyState = document.getElementById('empty-state');
             const project = appData.projects[appData.activeProjectIndex];
-            const currentDay = project ? (project.days ? project.days[appData.activeDayIndex] : null) : null;
+            const currentDay = (project && project.days) ? project.days[appData.activeDayIndex] : null;
 
-            if (!currentDay || currentDay.items.length === 0) {
+            if (!currentDay || (currentDay.items && currentDay.items.length === 0)) {
                 container.innerHTML = "";
                 emptyState.classList.remove('hidden');
             } else {
